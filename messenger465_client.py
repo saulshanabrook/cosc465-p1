@@ -31,14 +31,14 @@ class MessageBoardNetwork(object):
 
     def getMessages(self):
         '''
-        You should make calls to get messages from the message 
+        You should make calls to get messages from the message
         board server here.
         '''
         pass
 
     def postMessage(self, user, message):
         '''
-        You should make calls to post messages to the message 
+        You should make calls to post messages to the message
         board server here.
         '''
         pass
@@ -75,14 +75,14 @@ class MessageBoardController(object):
         This method gets called every second for retrieving
         messages from the server.  It calls the MessageBoardNetwork
         method getMessages() to do the "hard" work of retrieving
-        the messages from the server, then it should call 
+        the messages from the server, then it should call
         methods in MessageBoardView to display them in the GUI.
 
         You'll need to parse the response data from the server
         and figure out what should be displayed.
 
         Two relevant methods are (1) self.view.setListItems, which
-        takes a list of strings as input, and displays that 
+        takes a list of strings as input, and displays that
         list of strings in the GUI, and (2) self.view.setStatus,
         which can be used to display any useful status information
         at the bottom of the GUI.
@@ -126,7 +126,7 @@ class MessageBoardView(tkinter.Frame):
 
     def setMessageCallback(self, messagefn):
         '''
-        Set up the callback function when a message is generated 
+        Set up the callback function when a message is generated
         from the GUI.
         '''
         self.message_callback = messagefn
@@ -139,11 +139,11 @@ class MessageBoardView(tkinter.Frame):
         '''
         self.message_list.delete(0, self.message_list.size())
         self.message_list.insert(0, *mlist)
-        
+
     def newMessage(self, evt):
         '''Called when user hits entry in message window.  Send message
         to controller, and clear out the entry'''
-        message = self.entry.get()  
+        message = self.entry.get()
         if len(message):
             self.message_callback(message)
         self.entry.delete(0, len(self.entry.get()))
@@ -167,10 +167,10 @@ if __name__ == '__main__':
                         help='Set the host name for server to send requests to (default: localhost)')
     parser.add_argument('--port', dest='port', type=int, default=1111,
                         help='Set the port number for the server (default: 1111)')
+    parser.add_argument('--username', dest='username', type=str,
+                        help='Set your user name (max 8 characters')
     args = parser.parse_args()
 
-    myname = input("What is your user name (max 8 characters)? ")
-
-    app = MessageBoardController(myname, args.host, args.port)
+    app = MessageBoardController(args.username, args.host, args.port)
     app.run()
 
