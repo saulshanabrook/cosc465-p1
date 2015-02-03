@@ -2,10 +2,13 @@ server:
   build: .
   environment:
     DISPLAY: 192.168.59.3:0
-  command: python3 MBserver465.pyc
+  command: python3 /code/MBserver465.pyc
 client:
+  build: .
+  volumes:
+    - .:/code/
   links:
     - server
-  command: python3 messenger465_client.py --host server
+  command: python3 /code/messenger465_client.py --host server --username saul
   environment:
     DISPLAY: 192.168.59.3:0
