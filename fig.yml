@@ -1,0 +1,11 @@
+server:
+  build: .
+  environment:
+    DISPLAY: 192.168.59.3:0
+  command: python3 MBserver465.pyc
+client:
+  links:
+    - server
+  command: python3 messenger465_client.py --host server
+  environment:
+    DISPLAY: 192.168.59.3:0
