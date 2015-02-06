@@ -14,6 +14,13 @@ Run
 open -a XQuartz
 socat TCP-LISTEN:6000,reuseaddr,fork UNIX-CLIENT:\"$DISPLAY\"
 # in another window
-fig up server
-fig run client
+fig up
+```
+
+## Non Mac
+???
+Maybe
+```
+socat TCP-LISTEN:6000,reuseaddr,fork UNIX-CLIENT:\"$DISPLAY\"
+fig up
 ```

@@ -9,6 +9,13 @@ client:
     - .:/code/
   links:
     - server
+    - wdb
   command: python3 /code/messenger465_client.py --host server --username saul
   environment:
     DISPLAY: 192.168.59.3:0
+    WDB_SOCKET_SERVER: wdb
+    WDB_NO_BROWSER_AUTO_OPEN: True
+wdb:
+  image: saulshanabrook/wdb-server
+  ports:
+    - "1984:1984"
