@@ -2,7 +2,7 @@ server:
   build: .
   environment:
     DISPLAY: 192.168.59.3:0
-  command: python3 /code/MBserver465.pyc
+  command: python3 /code/MBserver465.pyc --version C --postdrop 0.5 --getdrop 0.5 --ber 0.5 --delay 1
 client:
   build: .
   volumes:
@@ -10,7 +10,7 @@ client:
   links:
     - server
     - wdb
-  command: python3 /code/messenger465_client.py --host server --username saul
+  command: python3 /code/messenger465_client.py --host server --username saul --timeout 2
   environment:
     DISPLAY: 192.168.59.3:0
     WDB_SOCKET_SERVER: wdb

@@ -3,6 +3,7 @@ import sys
 import tkinter
 import socket
 import argparse
+import collections
 
 from select import select
 
@@ -43,17 +44,6 @@ class ServerException(BaseMessageBoardException):
         return 'Server error: ' + self.server_error
 
 
-class UnknownResponse(BaseMessageBoardException):
-    '''
-    Raised when the response from the server can not be interpreted
-    '''
-    def __init__(self, response):
-        self.response = response
-
-    def __str__(self):
-        return 'Unkown server response: ' + self.response
-
-
 class Timeout(BaseMessageBoardException):
     '''
     Raised when the server did not response before the timeout
@@ -63,6 +53,77 @@ class Timeout(BaseMessageBoardException):
 
     def __str__(self):
         return 'Server timeout'
+
+
+class ExceededMaxRetries(BaseMessageBoardException):
+    '''
+    Raised when a request failed to get a response after trying for
+    multiple times
+    '''
+    def __init__(self, exceptions):
+        self.exceptions = exceptions
+
+    def __str__(self):
+        return 'Max Retries Exceeded: ' + repr(self.exceptions)
+
+
+class UnknownResponse(BaseMessageBoardException):
+    '''
+    Raised when the data sent from the server can not be parsed
+    '''
+    def __init__(self, response_data):
+        self.response_data = response_data
+
+    def __str__(self):
+        return 'UnkownResponse: ' + self.response_data
+
+
+class IncorrectHeader(Exception):
+    '''
+    Raised if the packet from the server has a bad header.
+
+    Could be either the wrong version, a mismatch of sequences, or the wrong
+    checksum
+    '''
+    pass
+
+
+class WrongHeaderVersion(IncorrectHeader):
+    '''
+    Raised if the header version that is recieved is not correct
+    '''
+    def __init__(self, returned_version, expected_version):
+        self.returned_version = returned_version
+        self.expected_version = expected_version
+
+    def __str__(self):
+        return 'Wrong header version. Got {}, expected {}'.format(self.returned_version, self.expected_version)
+
+
+class WrongHeaderSequence(IncorrectHeader):
+    '''
+    Raised if the sequence in the returned header is not the same as the
+    current sequence
+    '''
+    def __init__(self, returned_sequence, expected_sequence):
+        self.returned_sequence = returned_sequence
+        self.expected_sequence = expected_sequence
+
+    def __str__(self):
+        return 'Wrong header sequence. Got {}, expected {}'.format(self.returned_sequence, self.expected_sequence)
+
+
+class WrongHeaderChecksum(IncorrectHeader):
+    '''
+    Raised if the checksum is wrong for the data.
+    '''
+    def __init__(self, returned_checksum, expected_checksum, data):
+        self.returned_checksum = returned_checksum
+        self.expected_checksum = expected_checksum
+        self.data = data
+
+    def __str__(self):
+        return 'Wrong header checksum. Got {}, expected {} for {}'.format(self.returned_sequence, self.expected_sequence, self.data)
 
 
 class MessageBoardNetwork(object):
@@ -75,12 +136,11 @@ class MessageBoardNetwork(object):
     '''
 
     BUFFER_LENGTH = 1400
-    HEADER = 'A'
-    TIMEOUT = 0.1  # 100ms
-    MAX_USERNAME_LENGTH = 8
-    MAX_MESSAGE_LENGTH = 60
+    VERSION = b'C'
 
-    def __init__(self, host, port):
+    sequences = collections.deque((b'0', b'1'))
+
+    def __init__(self, host, port, retries, timeout):
         '''
         Constructor. You should create a new socket
         here and do any other initialization.
@@ -88,6 +148,12 @@ class MessageBoardNetwork(object):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, 0)
         self.host = host
         self.port = port
+        self.retries = retries
+        self.timeout = timeout  # in seconds
+
+    @property
+    def sequence(self):
+        return self.sequences[0]
 
     @property
     def address(self):
@@ -140,11 +206,31 @@ class MessageBoardNetwork(object):
         '''
         Sends some data to the server and returns the response
         '''
-        return self._parse_recieved_data(
-            self._send_on_socket(
-                self._prepare_data_for_sending(data)
-            )
-        )
+        data_with_header = self._prepare_data_for_sending(data)
+
+        times_tried = 0
+        exceptions_so_far = []
+        while times_tried <= self.retries:
+            times_tried += 1
+            try:
+                recieved_data = self._send_on_socket(data_with_header)
+            except Timeout as e:
+                exceptions_so_far.append(e)
+                continue
+
+            try:
+                parsed_data = self._parse_recieved_data(recieved_data)
+            except IncorrectHeader as e:
+                exceptions_so_far.append(e)
+                continue
+            else:
+                self._increment_sequence()
+                return parsed_data
+
+        raise ExceededMaxRetries(exceptions_so_far)
+
+    def _increment_sequence(self):
+        self.sequences.rotate(1)
 
     def _send_on_socket(self, data):
         '''
@@ -159,30 +245,52 @@ class MessageBoardNetwork(object):
         try:
             # if it does, the first tuple will have a value in it, if not it
             # won't so the unpacking will fail and a ValueError will be raised
-            (_,), _, _ = select([self.socket], [], [], self.TIMEOUT)
+            (_,), _, _ = select([self.socket], [], [], self.timeout)
         except ValueError:
             raise Timeout()
         network_message, address = self.socket.recvfrom(self.BUFFER_LENGTH)
         return network_message
 
-    @classmethod
-    def _prepare_data_for_sending(cls, data):
+    def _prepare_data_for_sending(self, data):
         '''
         Takes the app layer data and adds the app layer header to it, to prepare
         it to be sent to the server
         '''
-        return (cls.HEADER + data).encode()
+        header = self.VERSION + self.sequence + self._generate_checksum(data.encode())
+        return header + data.encode()
 
-    @classmethod
-    def _parse_recieved_data(cls, network_message):
+    @staticmethod
+    def _generate_checksum(data):
+        '''
+        Given a bit of data (which is a string), it will generate a checksum
+        based off of bitwise XORing each bit
+        '''
+        checksum = 0
+        for b in data:
+            checksum ^= b
+        return bytes([checksum])
+
+    def _parse_recieved_data(self, network_message):
         '''
         Makes sure that the app layer header returned by the server is correct
         and returns the app layer data
         '''
-        network_message_string = network_message.decode()
-        if not network_message_string.startswith(cls.HEADER):
-            UnknownResponse("Doesn't start with header: {}".format(network_message_string))
-        return network_message_string[1:]
+        version, sequence, checksum, *data = network_message
+
+        version = bytes([version])
+        sequence = bytes([sequence])
+        checksum = bytes([checksum])
+        data = bytes(data)
+
+        calculated_checksum = self._generate_checksum(data)
+        if version != self.VERSION:
+            raise WrongHeaderVersion(version, self.VERSION)
+        if sequence != self.sequence:
+            raise WrongHeaderSequence(sequence, self.sequence)
+        if checksum != calculated_checksum:
+            raise WrongHeaderChecksum(checksum, calculated_checksum, data)
+
+        return data.decode()
 
 
 class MessageBoardController(object):
@@ -192,12 +300,12 @@ class MessageBoardController(object):
     to/from the server via the MessageBoardNetwork class.
     '''
 
-    def __init__(self, myname, host, port):
+    def __init__(self, myname, host, port, retries, timeout):
 
         self.name = myname
         self.view = MessageBoardView(myname)
         self.view.setMessageCallback(self.post_message_callback)
-        self.net = MessageBoardNetwork(host, port)
+        self.net = MessageBoardNetwork(host, port, retries, timeout)
 
         self.post_status = ''
         self.retrieve_status = ''
@@ -350,7 +458,11 @@ if __name__ == '__main__':
                         help='Set the port number for the server (default: 1111)')
     parser.add_argument('--username', dest='username', type=str,
                         help='Set your user name (max 8 characters')
+    parser.add_argument("--retries", dest='retries', type=int, default=3,
+                        help='Set the number of retransmissions in case of a timeout')
+    parser.add_argument("--timeout", dest='timeout', type=float, default=0.1,
+                        help='Set the RTO value')
     args = parser.parse_args()
 
-    app = MessageBoardController(args.username, args.host, args.port)
+    app = MessageBoardController(args.username, args.host, args.port, args.retries, args.timeout)
     app.run()
